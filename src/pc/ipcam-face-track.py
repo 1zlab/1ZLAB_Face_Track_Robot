@@ -30,7 +30,7 @@ cv2.namedWindow('FaceDetect',flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv
 
 # 摄像头的IP地址  
 # http://用户名：密码@IP地址：端口/
-ip_camera_url = 'http://admin:admin@192.168.2.237:8081/'
+ip_camera_url = 'http://admin:admin@192.168.43.1:8081/'
 # 创建一个VideoCapture
 cap = cv2.VideoCapture(ip_camera_url)
 # 设置缓存区的大小 !!!
@@ -146,6 +146,7 @@ while cap.isOpened():
         last_btm_degree = next_btm_degree
         last_top_degree = next_top_degree
         print("X轴偏移量：{} Y轴偏移量：{}".format(offset_x, offset_y))
+        # print('底部角度： {} 顶部角度：{}'.format(next_btm_degree, 1000))
         print('底部角度： {} 顶部角度：{}'.format(next_btm_degree, next_top_degree))
     # 在窗口Face上面展示图片img
     cv2.imshow('FaceDetect', img)
