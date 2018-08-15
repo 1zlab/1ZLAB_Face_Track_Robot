@@ -27,8 +27,8 @@ def pack_bin_data(bottom_degree, top_degree):
     '''
 
     bin_data = struct.pack(">iiB",
-        int(bottom_degree), # 
-        int(top_degree), # y坐标，精确到小数点后两位
+        int(bottom_degree), # 顶部舵机的角度
+        int(top_degree), # 底部舵机的角度
         0x0A) # 结束符 '\n = 0x0A
     return bin_data
 

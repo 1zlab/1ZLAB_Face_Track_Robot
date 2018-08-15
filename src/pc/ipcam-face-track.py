@@ -4,28 +4,60 @@
 
 NOTE
 1. 为保证人脸识别的帧率分辨率控制在320x240
+BUG
+1. 刚开始的时候缓存区视频流的问题， 导致舵机云台会乱转 向大佬低头  数值越界
+ESP32出解析的数据：Bottom: 6553600 Top: 6556160
+2. Reset 舵机云台，串口数据发送之后，ESP32有时候不执行
 TODO
-1. 偏移量计算，得出人脸在画面中所占的百分比
-2. 添加PID控制（纯比例控制其实就足够了）
+1. 获得舵机旋转角度的反馈数据
+2. 创建两个Trackbar， 设置两个Kp取值
+3. 绘制上下臂舵机的波形图
 
+参考Kp取值
+1. Kp = 10  比例系数较大，来回抖动非常明显
+2. Kp = 20  幅度过大，旋转后目标直接丢失
+3. Kp = 5   幅度适中，有小幅抖动
+4. Kp = 2   相应速度比较慢
 '''
 import cv2
 import time
 from uart_cloud_platform import set_cloud_platform_degree
 
-# 最近一次底部舵机的角度值记录
-last_btm_degree = 100
-# 最近一次顶部舵机的角度值记录
-last_top_degree = 100
+last_btm_degree = 100 # 最近一次底部舵机的角度值记录
+last_top_degree = 100 # 最近一次顶部舵机的角度值记录
+
+btm_kp = 5 # 底部舵机的Kp系数
+top_kp = 5 # 顶部舵机的Kp系数
+
+offset_dead_block = 0.1 # 设置偏移量的死区
+
 # 舵机角度初始化
 set_cloud_platform_degree(last_btm_degree, last_top_degree)
-
 
 # 载入人脸检测的Cascade模型
 FaceCascade = cv2.CascadeClassifier('./haar/haarcascade_frontalface_default.xml')
 
 # 创建一个窗口 名字叫做Face
 cv2.namedWindow('FaceDetect',flags=cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+
+def update_btm_kp(value):
+    # 更新底部舵机的比例系数
+    global btm_kp
+    btm_kp = value
+
+def update_top_kp(value):
+    # 更新顶部的比例系数
+    global top_kp
+    top_kp = value
+
+# 创建底部舵机Kp的滑动条
+cv2.createTrackbar('BtmServoKp','FaceDetect',0, 20,update_btm_kp)
+# 设置btm_kp的默认值
+cv2.setTrackbarPos('BtmServoKp', 'FaceDetect', btm_kp)
+# 创建顶部舵机Kp的滑动条
+cv2.createTrackbar('TopServoKp','FaceDetect',0, 20,update_top_kp)
+# 设置top_kp的默认值
+cv2.setTrackbarPos('TopServoKp', 'FaceDetect', top_kp)
 
 
 # 摄像头的IP地址  
@@ -41,16 +73,20 @@ print('IP摄像头是否开启： {}'.format(cap.isOpened()))
 
 def btm_servo_control(offset_x):
     '''
+    底部舵机的比例控制
     这里舵机使用开环控制
     '''
-    Kp = 0.1 # 控制舵机旋转的比例系数
-    global last_btm_degree
-    # offset范围在-50到50左右
-    delta_degree = offset_x * Kp
-    # 设置最小阈值
-    if abs(delta_degree) < 1:
-        delta_degree = 0
+    global offset_dead_block # 偏移量死区大小
+    global btm_kp # 控制舵机旋转的比例系数
+    global last_btm_degree # 上一次底部舵机的角度
     
+    # 设置最小阈值
+    if abs(offset_x) < offset_dead_block:
+       offset_x = 0
+
+    # offset范围在-50到50左右
+    delta_degree = offset_x * btm_kp
+    # 计算得到新的底部舵机角度
     next_btm_degree = last_btm_degree + delta_degree
     # 添加边界检测
     if next_btm_degree < 0:
@@ -58,21 +94,25 @@ def btm_servo_control(offset_x):
     elif next_btm_degree > 180:
         next_btm_degree = 180
     
-    return next_btm_degree
+    return int(next_btm_degree)
 
 def top_servo_control(offset_y):
     '''
+    顶部舵机的比例控制
     这里舵机使用开环控制
     '''
-    Kp = 0.1 # 控制舵机旋转的比例系数
-    global last_top_degree
+    global offset_dead_block
+    global top_kp # 控制舵机旋转的比例系数
+    global last_top_degree # 上一次顶部舵机的角度
+
+    # 如果偏移量小于阈值就不相应
+    if abs(offset_y) < offset_dead_block:
+        offset_y = 0
+
     # offset_y *= -1
     # offset范围在-50到50左右
-    delta_degree = offset_y * Kp
-    # 设置最小阈值
-    if abs(delta_degree) < 1:
-        delta_degree = 0
-    
+    delta_degree = offset_y * top_kp
+    # 新的顶部舵机角度
     next_top_degree = last_top_degree + delta_degree
     # 添加边界检测
     if next_top_degree < 0:
@@ -80,7 +120,7 @@ def top_servo_control(offset_y):
     elif next_top_degree > 180:
         next_top_degree = 180
     
-    return next_top_degree
+    return int(next_top_degree)
 
 def face_filter(faces):
     '''
@@ -99,15 +139,15 @@ def face_filter(faces):
 def calculate_offset(img_width, img_height, face):
     '''
     计算人脸在画面中的偏移量
+    偏移量的取值范围： [-1, 1]
     '''
     (x, y, w, h) = face
     face_x = float(x + w/2.0)
     face_y = float(y + h/2.0)
-    # 人脸举例
-    offset_x = int(float(face_x / img_width - 0.5) * 100)
-    offset_y = int(float(face_y / img_height - 0.5) * 100)
-    # offset_x = face_x - img_width/2
-    # offset_y = face_y - img_height/2
+    # 人脸在画面中心X轴上的偏移量
+    offset_x = float(face_x / img_width - 0.5) * 2
+    # 人脸在画面中心Y轴上的偏移量
+    offset_y = float(face_y / img_height - 0.5) * 2
 
     return (offset_x, offset_y)
 
@@ -139,32 +179,29 @@ while cap.isOpened():
         # 计算下一步舵机要转的角度
         next_btm_degree = btm_servo_control(offset_x)
         next_top_degree = top_servo_control(offset_y)
-
         # 舵机转动
         set_cloud_platform_degree(next_btm_degree, next_top_degree)
         # 更新角度值
         last_btm_degree = next_btm_degree
         last_top_degree = next_top_degree
         print("X轴偏移量：{} Y轴偏移量：{}".format(offset_x, offset_y))
-        # print('底部角度： {} 顶部角度：{}'.format(next_btm_degree, 1000))
         print('底部角度： {} 顶部角度：{}'.format(next_btm_degree, next_top_degree))
     # 在窗口Face上面展示图片img
     cv2.imshow('FaceDetect', img)
-
+    # 等待键盘事件
     key = cv2.waitKey(1)
     if key == ord('q'):
         # 退出程序
         break
     elif key == ord('r'):
         print('舵机重置')
-        # 重置电机
+        # 重置舵机
         # 最近一次底部舵机的角度值记录
         last_btm_degree = 100
         # 最近一次顶部舵机的角度值记录
         last_top_degree = 100
         # 舵机角度初始化
         set_cloud_platform_degree(last_btm_degree, last_top_degree)
-
 
 # 释放VideoCapture
 cap.release()
