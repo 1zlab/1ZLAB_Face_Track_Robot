@@ -23,8 +23,8 @@
 
 
 ![人脸追踪](https://upload-images.jianshu.io/upload_images/1199728-b36f9fc558602b30.PNG?imageMogr2/auto-orient/strip%7CimageView2/2/w/700)
-
-> TODO 添加视频链接
+视频链接：
+[【OpenCV基础教程】3.人脸追踪-舵机云台比例控制（1Z实验室）](https://www.bilibili.com/video/av29528518)
 
 **追踪算法**
 
